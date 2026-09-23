@@ -1,2 +1,9 @@
 -- Schema is managed by GORM AutoMigrate on application startup.
 -- This file documents the initial migration boundary for DBAs.
+--
+-- 后续字段变更：
+-- sensors.last_reported_at DATETIME NULL  -- 传感器最近一次成功上报读数的时间；
+--                                          NULL 表示从未上报。以该字段为准判定在线状态：
+--                                          距当前时间 <= 5 分钟为 online，否则为 offline
+--                                          （每次 POST /api/v1/readings 时随读数一起更新）。
+-- sensors.status 列继续保留，由服务端按 last_reported_at 实时解析后返回。

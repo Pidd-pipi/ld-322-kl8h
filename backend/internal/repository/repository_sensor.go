@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"github.com/cygreenenv/greenhouse-panel/internal/constants"
 	apperrors "github.com/cygreenenv/greenhouse-panel/internal/errors"
 	"github.com/cygreenenv/greenhouse-panel/internal/model"
 	"gorm.io/gorm"
@@ -36,8 +37,17 @@ func (r *SensorRepository) Get(id uint) (*model.Sensor, error) {
 	return &sensor, nil
 }
 func (r *SensorRepository) AddReading(reading *model.SensorReading) error {
-	if err := r.db.Create(reading).Error; err != nil {
-		return fmt.Errorf("create reading: %w", err)
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(reading).Error; err != nil {
+			return fmt.Errorf("create reading: %w", err)
+		}
+		if err := tx.Model(&model.Sensor{}).Where("id = ?", reading.SensorID).Updates(map[string]any{"last_reported_at": reading.RecordedAt, "status": constants.StatusOnline}).Error; err != nil {
+			return fmt.Errorf("mark sensor reported: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }

@@ -34,6 +34,7 @@ func Seed(db *gorm.DB) error {
 }
 func seedGreenhouse(db *gorm.DB, g model.Greenhouse, offset int) error {
 	types := []string{constants.SensorTemperature, constants.SensorHumidity, constants.SensorLight, constants.SensorCO2, constants.SensorSoil}
+	now := time.Now()
 	for idx, typ := range types {
 		rangeDef := constants.DefaultThresholds[typ]
 		sensor := model.Sensor{GreenhouseID: g.ID, Name: constants.SensorLabels[typ] + "传感器", Type: typ, Unit: constants.SensorUnits[typ], Status: constants.StatusOnline}
@@ -46,10 +47,15 @@ func seedGreenhouse(db *gorm.DB, g model.Greenhouse, offset int) error {
 		for hour := 24; hour >= 0; hour-- {
 			center := (rangeDef.Min + rangeDef.Max) / 2
 			variation := (rangeDef.Max - rangeDef.Min) * 0.12 * math.Sin(float64(hour+idx+offset))
-			reading := model.SensorReading{SensorID: sensor.ID, Value: center + variation, RecordedAt: time.Now().Add(-time.Duration(hour) * time.Hour)}
+			recordedAt := now.Add(-time.Duration(hour) * time.Hour)
+			reading := model.SensorReading{SensorID: sensor.ID, Value: center + variation, RecordedAt: recordedAt}
 			if err := db.Create(&reading).Error; err != nil {
 				return fmt.Errorf("seed reading: %w", err)
 			}
+		}
+		// 预置数据最近一轮刚上报，演示温室默认全部在线
+		if err := db.Model(&model.Sensor{}).Where("id = ?", sensor.ID).Updates(map[string]any{"last_reported_at": now, "status": constants.StatusOnline}).Error; err != nil {
+			return fmt.Errorf("seed sensor report time: %w", err)
 		}
 	}
 	devices := []model.Device{{GreenhouseID: g.ID, Name: "循环风机", Type: "fan", Status: constants.StatusOn}, {GreenhouseID: g.ID, Name: "遮阳帘", Type: "shade", Status: constants.StatusOff}, {GreenhouseID: g.ID, Name: "灌溉泵", Type: "pump", Status: constants.StatusOff}, {GreenhouseID: g.ID, Name: "补光灯", Type: "light", Status: constants.StatusOn}}

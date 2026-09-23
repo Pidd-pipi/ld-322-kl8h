@@ -22,20 +22,52 @@ type MonitoringService struct {
 func NewMonitoringService(g *repository.GreenhouseRepository, s *repository.SensorRepository, a *repository.AlertRepository, l *slog.Logger, h *ws.Hub) *MonitoringService {
 	return &MonitoringService{g, s, a, l, h}
 }
+
+// resolveGreenhouseStatus 依据每个传感器最近上报时间刷新在线状态，并返回离线传感器数量。
+func resolveGreenhouseStatus(g *model.Greenhouse) int {
+	offline := 0
+	now := time.Now()
+	for i := range g.Sensors {
+		g.Sensors[i].ResolveStatus(now)
+		if g.Sensors[i].Status == constants.StatusOffline {
+			offline++
+		}
+	}
+	return offline
+}
 func (s *MonitoringService) ListGreenhouses() ([]model.Greenhouse, error) {
-	return s.greenhouseRepo.List()
+	rows, err := s.greenhouseRepo.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		resolveGreenhouseStatus(&rows[i])
+	}
+	return rows, nil
 }
 func (s *MonitoringService) Detail(id uint) (*model.Greenhouse, error) {
-	return s.greenhouseRepo.Get(id)
+	g, err := s.greenhouseRepo.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	resolveGreenhouseStatus(g)
+	return g, nil
 }
 func (s *MonitoringService) Ingest(sensorID uint, value float64) (*model.SensorReading, *model.Alert, error) {
 	sensor, err := s.sensorRepo.Get(sensorID)
 	if err != nil {
 		return nil, nil, err
 	}
+	wasOffline := !sensor.IsOnline(time.Now())
 	reading := &model.SensorReading{SensorID: sensorID, Value: value, RecordedAt: time.Now()}
 	if err = s.sensorRepo.AddReading(reading); err != nil {
 		return nil, nil, err
+	}
+	sensor.LastReportedAt = &reading.RecordedAt
+	sensor.ResolveStatus(reading.RecordedAt)
+	// 重新上报立即恢复在线，并通知前端刷新状态
+	if wasOffline {
+		s.hub.Broadcast(constants.EventSensor, sensor)
 	}
 	var alert *model.Alert
 	if value < sensor.Threshold.MinValue || value > sensor.Threshold.MaxValue {
@@ -56,7 +88,15 @@ func (s *MonitoringService) History(greenhouseID uint, types []string, start, en
 	return s.sensorRepo.History(greenhouseID, types, start, end)
 }
 func (s *MonitoringService) Latest(greenhouseID uint) ([]model.SensorReading, error) {
-	return s.sensorRepo.LatestForGreenhouse(greenhouseID)
+	rows, err := s.sensorRepo.LatestForGreenhouse(greenhouseID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	for i := range rows {
+		rows[i].Sensor.ResolveStatus(now)
+	}
+	return rows, nil
 }
 func (s *MonitoringService) UpdateThreshold(sensorID uint, min, max float64) (*model.Threshold, error) {
 	return s.sensorRepo.UpdateThreshold(sensorID, min, max)
@@ -82,7 +122,7 @@ func (s *MonitoringService) CreateGreenhouse(row *model.Greenhouse) error {
 	return s.greenhouseRepo.Create(row)
 }
 func (s *MonitoringService) CreateSensor(greenhouseID uint, name, sensorType string, min, max float64) (*model.Sensor, error) {
-	sensor := &model.Sensor{GreenhouseID: greenhouseID, Name: name, Type: sensorType, Unit: constants.SensorUnits[sensorType], Status: constants.StatusOnline}
+	sensor := &model.Sensor{GreenhouseID: greenhouseID, Name: name, Type: sensorType, Unit: constants.SensorUnits[sensorType], Status: constants.StatusOffline}
 	threshold := &model.Threshold{MinValue: min, MaxValue: max}
 	if err := s.sensorRepo.Create(sensor, threshold); err != nil {
 		return nil, err
