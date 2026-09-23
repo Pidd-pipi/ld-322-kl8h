@@ -6,6 +6,7 @@ import (
 	apperrors "github.com/cygreenenv/greenhouse-panel/internal/errors"
 	"github.com/cygreenenv/greenhouse-panel/internal/model"
 	"gorm.io/gorm"
+	"time"
 )
 
 type GreenhouseRepository struct{ db *gorm.DB }
@@ -15,6 +16,10 @@ func (r *GreenhouseRepository) List() ([]model.Greenhouse, error) {
 	var rows []model.Greenhouse
 	if err := r.db.Preload("Sensors.Threshold").Preload("Devices").Order("id asc").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list greenhouses: %w", err)
+	}
+	now := time.Now()
+	for i := range rows {
+		model.RefreshSensorsStatus(rows[i].Sensors, now)
 	}
 	return rows, nil
 }
@@ -33,5 +38,6 @@ func (r *GreenhouseRepository) Get(id uint) (*model.Greenhouse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get greenhouse: %w", err)
 	}
+	model.RefreshSensorsStatus(row.Sensors, time.Now())
 	return &row, nil
 }

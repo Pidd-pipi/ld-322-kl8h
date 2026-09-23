@@ -37,6 +37,9 @@ func (s *MonitoringService) Ingest(sensorID uint, value float64) (*model.SensorR
 	if err = s.sensorRepo.AddReading(reading); err != nil {
 		return nil, nil, err
 	}
+	// 重新上报后立即恢复在线，并记录最近上报时间。
+	sensor.LastReportedAt = &reading.RecordedAt
+	sensor.Status = constants.StatusOnline
 	var alert *model.Alert
 	if value < sensor.Threshold.MinValue || value > sensor.Threshold.MaxValue {
 		level := "warning"

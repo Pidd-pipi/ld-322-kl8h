@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"github.com/cygreenenv/greenhouse-panel/internal/constants"
 	apperrors "github.com/cygreenenv/greenhouse-panel/internal/errors"
 	"github.com/cygreenenv/greenhouse-panel/internal/model"
 	"gorm.io/gorm"
@@ -33,13 +34,21 @@ func (r *SensorRepository) Get(id uint) (*model.Sensor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get sensor: %w", err)
 	}
+	sensor.RefreshStatus(time.Now())
 	return &sensor, nil
 }
 func (r *SensorRepository) AddReading(reading *model.SensorReading) error {
-	if err := r.db.Create(reading).Error; err != nil {
-		return fmt.Errorf("create reading: %w", err)
-	}
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(reading).Error; err != nil {
+			return fmt.Errorf("create reading: %w", err)
+		}
+		// 每次上报都刷新最近上报时间并立即恢复在线状态。
+		if err := tx.Model(&model.Sensor{}).Where("id = ?", reading.SensorID).
+			Updates(map[string]any{"last_reported_at": reading.RecordedAt, "status": constants.StatusOnline}).Error; err != nil {
+			return fmt.Errorf("touch sensor heartbeat: %w", err)
+		}
+		return nil
+	})
 }
 func (r *SensorRepository) UpdateThreshold(id uint, min, max float64) (*model.Threshold, error) {
 	var t model.Threshold
@@ -66,6 +75,10 @@ func (r *SensorRepository) History(greenhouseID uint, types []string, start, end
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query history: %w", err)
 	}
+	now := time.Now()
+	for i := range rows {
+		rows[i].Sensor.RefreshStatus(now)
+	}
 	return rows, nil
 }
 func (r *SensorRepository) LatestForGreenhouse(greenhouseID uint) ([]model.SensorReading, error) {
@@ -74,10 +87,12 @@ func (r *SensorRepository) LatestForGreenhouse(greenhouseID uint) ([]model.Senso
 	if err := r.db.Raw(sql, greenhouseID, greenhouseID).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("latest readings: %w", err)
 	}
+	now := time.Now()
 	for i := range rows {
 		if err := r.db.Preload("Threshold").First(&rows[i].Sensor, rows[i].SensorID).Error; err != nil {
 			return nil, fmt.Errorf("load latest sensor: %w", err)
 		}
+		rows[i].Sensor.RefreshStatus(now)
 	}
 	return rows, nil
 }

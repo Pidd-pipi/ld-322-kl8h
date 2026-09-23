@@ -1,2 +1,7 @@
 -- Schema is managed by GORM AutoMigrate on application startup.
 -- This file documents the initial migration boundary for DBAs.
+--
+-- 在线状态补充：sensors 表新增 last_reported_at（*time.Time, 可空，已加索引）。
+-- 每次写入读数时更新该字段并把 status 置为 online；查询时若
+-- last_reported_at 距今超过 5 分钟（constants.SensorOfflineThreshold）
+-- 或为 NULL，则在接口响应中推导为 offline。历史库由 AutoMigrate 自动补列。

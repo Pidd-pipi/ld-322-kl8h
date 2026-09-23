@@ -1,3 +1,59 @@
-import { Card, Col, Row, Statistic } from 'antd'; import { WarningOutlined } from '@ant-design/icons'; import type { Reading } from '../../types/domain';
-const labels:Record<string,string>={temperature:'温度',humidity:'湿度',light:'光照',co2:'CO₂',soil_moisture:'土壤湿度'};
-export default function MetricCards({readings}:{readings:Reading[]}){return <Row gutter={[16,16]}>{readings.map(row=>{const abnormal=Boolean(row.sensor?.threshold&&(row.value<row.sensor.threshold.minValue||row.value>row.sensor.threshold.maxValue));return <Col xs={24} sm={12} xl={6} key={row.id}><Card className={abnormal?'metric-card abnormal':'metric-card'}><Statistic title={labels[row.sensor?.type]??'环境参数'} value={row.value} precision={1} suffix={row.sensor?.unit} prefix={abnormal?<WarningOutlined/>:undefined}/><small>{abnormal?'超出配置阈值':'传感器状态正常'}</small></Card></Col>})}</Row>}
+import { Card, Col, Row, Statistic, Tag, Tooltip } from 'antd';
+import { WarningOutlined, DisconnectOutlined } from '@ant-design/icons';
+import type { Reading, Sensor } from '../../types/domain';
+import { formatAgo, isOnline, SENSOR_LABELS } from '../../utils/sensorStatus';
+
+type Props = { sensors: Sensor[]; readings: Reading[]; now: number };
+
+export default function MetricCards({ sensors, readings, now }: Props) {
+  const latestBySensor = new Map<number, Reading>();
+  readings.forEach((row) => latestBySensor.set(row.sensorId, row));
+
+  return (
+    <Row gutter={[16, 16]}>
+      {sensors.map((sensor) => {
+        const online = isOnline(sensor, now);
+        const latest = latestBySensor.get(sensor.id);
+        const abnormal = online && Boolean(
+          latest && sensor.threshold &&
+          (latest.value < sensor.threshold.minValue || latest.value > sensor.threshold.maxValue),
+        );
+        const className = online ? (abnormal ? 'metric-card abnormal' : 'metric-card') : 'metric-card offline';
+
+        return (
+          <Col xs={24} sm={12} xl={8} key={sensor.id} className="metric-col">
+            <Card className={className}>
+              {online ? (
+                <Statistic
+                  title={SENSOR_LABELS[sensor.type] ?? sensor.name}
+                  value={latest ? latest.value : '—'}
+                  precision={latest ? 1 : undefined}
+                  suffix={latest ? sensor.unit : undefined}
+                  prefix={abnormal ? <WarningOutlined /> : undefined}
+                />
+              ) : (
+                <Statistic
+                  title={<span>{SENSOR_LABELS[sensor.type] ?? sensor.name} <Tag color="default" icon={<DisconnectOutlined />}>离线</Tag></span>}
+                  value="—"
+                  suffix={sensor.unit}
+                />
+              )}
+              <small>
+                {online ? (
+                  abnormal ? '超出配置阈值' : '传感器在线 · 数据正常'
+                ) : latest ? (
+                  <Tooltip title={`旧读数 ${latest.value.toFixed(1)}${sensor.unit}，采集于 ${new Date(latest.recordedAt).toLocaleString('zh-CN', { hour12: false })}，不再代表当前值`}>
+                    <span className="stale-hint">超过 5 分钟未上报 · 旧值 {latest.value.toFixed(1)}{sensor.unit}（仅供参考）</span>
+                  </Tooltip>
+                ) : (
+                  <span className="stale-hint">从未收到上报数据</span>
+                )}
+              </small>
+              {sensor.lastReportedAt && <div className="metric-foot">最近上报：{formatAgo(sensor, now)}</div>}
+            </Card>
+          </Col>
+        );
+      })}
+    </Row>
+  );
+}

@@ -36,7 +36,8 @@ func seedGreenhouse(db *gorm.DB, g model.Greenhouse, offset int) error {
 	types := []string{constants.SensorTemperature, constants.SensorHumidity, constants.SensorLight, constants.SensorCO2, constants.SensorSoil}
 	for idx, typ := range types {
 		rangeDef := constants.DefaultThresholds[typ]
-		sensor := model.Sensor{GreenhouseID: g.ID, Name: constants.SensorLabels[typ] + "传感器", Type: typ, Unit: constants.SensorUnits[typ], Status: constants.StatusOnline}
+		reportedAt := time.Now()
+		sensor := model.Sensor{GreenhouseID: g.ID, Name: constants.SensorLabels[typ] + "传感器", Type: typ, Unit: constants.SensorUnits[typ], Status: constants.StatusOnline, LastReportedAt: &reportedAt}
 		if err := db.Create(&sensor).Error; err != nil {
 			return fmt.Errorf("seed sensor: %w", err)
 		}
